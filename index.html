@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Complex Single-File HTML App — Dashboard + Editor + Tools</title>
+  <style>
+    :root{
+      --bg:#0f1724; --card:#0b1220; --muted:#9aa6bf; --accent:#6ee7b7; --glass: rgba(255,255,255,0.04);
+      --glass-2: rgba(255,255,255,0.02);
+      --radius:12px; --gap:16px; --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%; margin:0; font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background:linear-gradient(180deg,#071021 0%, #071428 60%); color:#dbe7ff}
+    .app{display:grid; grid-template-columns:260px 1fr; gap:var(--gap); height:100vh; padding:20px}
+
+    /* Sidebar */
+    .sidebar{background:linear-gradient(180deg,var(--card), #071427); border-radius:var(--radius); padding:18px; min-height:0; display:flex; flex-direction:column}
+    .brand{display:flex; gap:12px; align-items:center; margin-bottom:12px}
+    .logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#3b82f6);display:grid;place-items:center;font-weight:700}
+    .brand h1{font-size:14px;margin:0}
+    nav{display:flex; flex-direction:column; gap:8px; margin-top:8px}
+    .nav-item{padding:10px;border-radius:10px;cursor:pointer; display:flex; gap:10px; align-items:center; color:var(--muted)}
+    .nav-item.active, .nav-item:hover{background:var(--glass); color:var(--accent)}
+
+    /* Content */
+    .main{display:flex; flex-direction:column; gap:var(--gap);}
+    .topbar{display:flex; justify-content:space-between; gap:12px}
+    .search{flex:1; display:flex; gap:8px; align-items:center; background:var(--glass-2); padding:8px 10px; border-radius:10px}
+    .search input{flex:1;background:transparent;border:0;color:inherit;outline:none}
+    .controls{display:flex; gap:8px; align-items:center}
+    button.btn{background:var(--glass); border:1px solid rgba(255,255,255,0.03); padding:8px 12px; border-radius:10px; color:var(--muted); cursor:pointer}
+    button.btn:hover{color:var(--accent)}
+
+    /* grid of widgets */
+    .grid{display:grid; grid-template-columns:repeat(3,1fr); gap:var(--gap); align-content:start}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent); padding:14px; border-radius:12px; box-shadow: 0 6px 18px rgba(2,6,23,0.6);}
+    .card h3{margin:0 0 8px 0;font-size:13px}
+    .stat{font-size:22px;font-weight:700}
+
+    /* editor */
+    .editor{display:grid; grid-template-columns:1fr 420px; gap:var(--gap); margin-top:var(--gap)}
+    .code{min-height:360px;background:#071025;border-radius:10px;padding:14px; font-family:var(--mono); overflow:auto}
+    .code[contenteditable]{outline:none}
+    .preview{background:linear-gradient(180deg,#061020,#071426); padding:12px;border-radius:10px; min-height:360px}
+
+    /* file cards */
+    .files{display:flex; gap:10px; flex-wrap:wrap}
+    .file{background:var(--glass); padding:8px 10px;border-radius:8px; cursor:grab}
+
+    /* table */
+    table{width:100%; border-collapse:collapse}
+    th,td{padding:8px;text-align:left;font-size:13px}
+    thead th{color:var(--muted); font-size:12px}
+    tbody tr:nth-child(odd){background:rgba(255,255,255,0.01)}
+
+    /* responsive */
+    @media (max-width:1100px){.grid{grid-template-columns:repeat(2,1fr)} .editor{grid-template-columns:1fr}}
+    @media (max-width:700px){.app{grid-template-columns:1fr} .sidebar{order:2} .main{order:1}}
+
+    /* drag overlay */
+    .drop-hint{position:fixed; inset:0; display:none; align-items:center; justify-content:center; pointer-events:none}
+    .drop-hint.show{display:flex}
+    .drop-hint .box{background:linear-gradient(90deg, rgba(50,50,60,0.6), rgba(10,20,40,0.4)); padding:20px;border-radius:12px; border:2px dashed rgba(255,255,255,0.06)}
+
+    /* footer */
+    .footer{font-size:12px;color:var(--muted); display:flex; justify-content:space-between}
+  </style>
+</head>
+<body>
+  <div class="app" role="application">
+    <aside class="sidebar" aria-label="Sidebar navigation">
+      <div class="brand">
+        <div class="logo">CB</div>
+        <div>
+          <h1>CodeBench</h1>
+          <div style="font-size:12px;color:var(--muted)">Single-file demo • No libs</div>
+        </div>
+      </div>
+
+      <nav>
+        <div class="nav-item active" data-section="dashboard">🏠 Dashboard</div>
+        <div class="nav-item" data-section="editor">✍️ Editor</div>
+        <div class="nav-item" data-section="tools">🧰 Tools</div>
+        <div class="nav-item" data-section="about">ℹ️ About</div>
+      </nav>
+
+      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.02);margin:12px 0">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:13px;color:var(--muted)">Theme</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" id="theme-toggle">Toggle theme</button>
+          <button class="btn" id="save-state">Save</button>
+        </div>
+      </div>
+
+      <div style="margin-top:auto;font-size:12px;color:var(--muted)">
+        <div>Logged in as <strong>Student</strong></div>
+        <div style="margin-top:6px">Local demo • offline</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="search" role="search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <input id="q" placeholder="Search files, commands or snippets..." aria-label="Search" />
+        </div>
+        <div class="controls">
+          <button class="btn" id="run-fib">Run heavy calc</button>
+          <button class="btn" id="export-html">Export HTML</button>
+        </div>
+      </div>
+
+      <section id="dashboard-section" class="grid" aria-live="polite">
+        <div class="card">
+          <h3>Quick stats</h3>
+          <div class="stat" id="stat-count">Files: 6</div>
+          <div style="margin-top:8px;color:var(--muted);font-size:13px">Last saved: <span id="last-saved">never</span></div>
+        </div>
+
+        <div class="card">
+          <h3>Mini chart (canvas)</h3>
+          <canvas id="mini-chart" width="300" height="120" style="width:100%;height:120px;border-radius:8px"></canvas>
+        </div>
+
+        <div class="card">
+          <h3>Files</h3>
+          <div class="files" id="file-list" aria-label="Files list"></div>
+        </div>
+
+        <div class="card" style="grid-column:span 2">
+          <h3>Recent activity</h3>
+          <table>
+            <thead><tr><th>Time</th><th>Action</th><th>File</th></tr></thead>
+            <tbody id="activity"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3>About</h3>
+          <div style="color:var(--muted);font-size:13px">This single-file app demonstrates multiple patterns: canvas drawing, drag/drop, web worker usage, inline markdown preview, localStorage persistence, and a tiny virtual file manager — all without dependencies.</div>
+        </div>
+      </section>
+
+      <section id="editor-section" style="display:none">
+        <div class="editor">
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <h3 style="margin:0">Editor</h3>
+              <div style="display:flex;gap:8px">
+                <button class="btn" id="new-file">New</button>
+                <button class="btn" id="save-file">Save</button>
+              </div>
+            </div>
+
+            <div class="code" id="code" contenteditable="true" spellcheck="false" aria-label="Code editor"># Hello — write Markdown or HTML here
+
+## Features
+- Double click file to load
+- Drag & drop files onto the editor
+</div>
+          </div>
+
+          <aside class="preview" aria-label="Preview">
+            <h3 style="margin-top:0">Live Preview</h3>
+            <div id="preview-inner" style="min-height:280px; overflow:auto; padding-top:6px"></div>
+          </aside>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h3>Files</h3>
+          <div id="files-table"></div>
+        </div>
+      </section>
+
+      <section id="tools-section" style="display:none">
+        <div class="grid" style="grid-template-columns:repeat(2,1fr)">
+          <div class="card">
+            <h3>Heavy Calc (Web Worker)</h3>
+            <div style="color:var(--muted);font-size:13px;margin-bottom:8px">Compute Fibonacci of N in a worker to keep UI responsive.</div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input id="fib-n" type="number" value="40" style="width:80px;padding:6px;border-radius:8px;border:0;background:var(--glass)"> 
+              <button class="btn" id="fib-go">Compute</button>
+            </div>
+            <pre id="fib-result" style="margin-top:10px;background:rgba(255,255,255,0.02);padding:10px;border-radius:8px;min-height:32px"></pre>
+          </div>
+
+          <div class="card">
+            <h3>Sorter & Filter</h3>
+            <div style="margin-bottom:8px;color:var(--muted)">Click header to sort. Use search box above to filter file names.</div>
+            <div id="mini-table"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="about-section" style="display:none">
+        <div class="card">
+          <h3>About this demo</h3>
+          <p style="color:var(--muted)">A compact demonstration created to show what's possible with only a single HTML file: small UI, local persistence, worker-based heavy tasks, and simple visualizations. No frameworks — pure DOM + Canvas + Web APIs.</p>
+        </div>
+      </section>
+
+      <div class="footer">
+        <div>Made with ❤️ • Single file</div>
+        <div id="status">Ready</div>
+      </div>
+    </main>
+  </div>
+
+  <div class="drop-hint" id="drop-hint">
+    <div class="box">Drop files here to import (JSON array of {name,content})</div>
+  </div>
+
+  <script>
+    // --- tiny app state
+    const state = {
+      files: [
+        {name:'welcome.md', content:'# Welcome\nThis is a single-file demo.'},
+        {name:'notes.md', content:'- take notes\n- press save'},
+        {name:'snippet.html', content:'<button onclick="alert(\'hi\')">Click me</button>'},
+        {name:'todo.md', content:'1. Learn\n2. Ship'},
+        {name:'data.json', content: JSON.stringify({now:Date.now(),items:[1,2,3]},null,2)},
+        {name:'script.js', content:"console.log('hi')"}
+      ],
+      activeFileIndex:0,
+      activities:[]
+    }
+
+    // --- helpers
+    const $ = sel => document.querySelector(sel)
+    const $$ = sel => Array.from(document.querySelectorAll(sel))
+
+    function renderFiles(){
+      const list = $('#file-list'); list.innerHTML='';
+      state.files.forEach((f,i)=>{
+        const el = document.createElement('div'); el.className='file'; el.textContent=f.name; el.draggable=true; el.dataset.index=i;
+        el.addEventListener('dblclick', ()=> loadFile(i));
+        el.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', i); });
+        list.appendChild(el);
+      });
+      $('#stat-count').textContent = `Files: ${state.files.length}`
+      renderTable();
+    }
+
+    function loadFile(i){
+      state.activeFileIndex = i;
+      $('#code').textContent = state.files[i].content;
+      logActivity('open', state.files[i].name);
+      updatePreview();
+    }
+
+    function saveActive(){
+      const idx = state.activeFileIndex || 0;
+      const content = $('#code').textContent;
+      const name = state.files[idx] ? state.files[idx].name : `file-${Date.now()}.txt`;
+      state.files[idx] = {name, content};
+      logActivity('save', name);
+      renderFiles();
+      $('#last-saved').textContent = new Date().toLocaleString();
+    }
+
+    function newFile(){
+      const name = `untitled-${state.files.length+1}.md`;
+      state.files.unshift({name,content:'# New file'});
+      state.activeFileIndex = 0;
+      renderFiles(); loadFile(0);
+    }
+
+    function logActivity(action, file){
+      state.activities.unshift({t: new Date().toLocaleTimeString(), action, file});
+      const tbody = $('#activity'); tbody.innerHTML = state.activities.slice(0,8).map(a=>`<tr><td>${a.t}</td><td>${a.action}</td><td>${a.file}</td></tr>`).join('');
+    }
+
+    // --- preview: simple Markdown-ish -> HTML (very small converter)
+    function md2html(md){
+      // escape
+      let out = md.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      out = out.replace(/^### (.*$)/gim,'<h3>$1</h3>');
+      out = out.replace(/^## (.*$)/gim,'<h2>$1</h2>');
+      out = out.replace(/^# (.*$)/gim,'<h1>$1</h1>');
+      out = out.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+      out = out.replace(/\*(.*?)\*/g,'<em>$1</em>');
+      out = out.replace(/^- (.*$)/gim,'<li>$1</li>');
+      out = out.replace(/(^|\n)\d+\. (.*?)(?=\n|$)/gim,'<li>$2</li>');
+      out = out.replace(/\n/g,'<br/>');
+      return out;
+    }
+
+    function updatePreview(){
+      const text = $('#code').textContent;
+      const preview = $('#preview-inner');
+      if(text.trim().startsWith('<')){
+        // treat as HTML
+        preview.innerHTML = text;
+      } else {
+        preview.innerHTML = md2html(text);
+      }
+    }
+
+    // --- simple canvas mini chart
+    function drawChart(){
+      const cvs = document.getElementById('mini-chart');
+      const ctx = cvs.getContext('2d');
+      ctx.clearRect(0,0,cvs.width,cvs.height);
+      const w = cvs.width; const h = cvs.height; 
+      const data = Array.from({length:24}, ()=>Math.random()*80+10);
+      // gradient
+      const g = ctx.createLinearGradient(0,0,0,h); g.addColorStop(0,'rgba(110,231,183,0.12)'); g.addColorStop(1,'rgba(59,130,246,0.02)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0,h);
+      data.forEach((v,i)=>{
+        const x = (i/(data.length-1))*w; const y = h - ((v/100)*h);
+        ctx.lineTo(x,y);
+      });
+      ctx.lineTo(w,h); ctx.closePath(); ctx.fill();
+      // stroke
+      ctx.strokeStyle = 'rgba(110,231,183,0.9)'; ctx.lineWidth=2; ctx.beginPath(); data.forEach((v,i)=>{ const x=(i/(data.length-1))*w; const y=h-((v/100)*h); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }); ctx.stroke();
+    }
+
+    // --- table render & sort
+    let sort = {col:'name',dir:1};
+    function renderTable(){
+      const el = document.getElementById('files-table');
+      const mini = document.getElementById('mini-table');
+      const rows = state.files.map((f,i)=>({i, name:f.name, size:f.content.length}));
+      // apply search
+      const q = $('#q').value.trim().toLowerCase();
+      const filtered = rows.filter(r=>r.name.toLowerCase().includes(q));
+      filtered.sort((a,b)=> sort.dir * ((a[sort.col] > b[sort.col])?1:-1));
+      // full table
+      el.innerHTML = `<table><thead><tr><th onclick="window.appSort('name')">Name</th><th onclick="window.appSort('size')">Size</th><th>Index</th></tr></thead><tbody>${filtered.map(r=>`<tr><td>${r.name}</td><td>${r.size}</td><td>${r.i}</td></tr>`).join('')}</tbody></table>`;
+      mini.innerHTML = el.innerHTML;
+    }
+    window.appSort = (col)=>{ if(sort.col===col) sort.dir*=-1; else { sort.col=col; sort.dir=1 } renderTable() }
+
+    // --- drag & drop import
+    const dropHint = $('#drop-hint');
+    window.addEventListener('dragover', e=>{ e.preventDefault(); dropHint.classList.add('show') });
+    window.addEventListener('dragleave', e=>{ dropHint.classList.remove('show') });
+    window.addEventListener('drop', e=>{
+      e.preventDefault(); dropHint.classList.remove('show');
+      const dt = e.dataTransfer;
+      if(dt.files && dt.files.length){
+        // try to read first file as text and parse as JSON
+        const f = dt.files[0]; const reader = new FileReader();
+        reader.onload = ev=>{
+          try{
+            const parsed = JSON.parse(ev.target.result);
+            if(Array.isArray(parsed)){
+              parsed.forEach(p=> state.files.push({name:p.name, content:p.content}))
+              renderFiles();
+              alert('Imported ' + parsed.length + ' files')
+            } else alert('Drop a JSON array of {name,content}')
+          } catch(err){ alert('Invalid JSON file') }
+        };
+        reader.readAsText(f);
+      } else {
+        // handle plain text dragged from another element
+      }
+    })
+
+    // --- worker setup via blob
+    let worker;
+    function startWorker(){
+      const code = `onmessage = function(e){function fib(n){ if(n<2) return n; return fib(n-1)+fib(n-2);} const res=fib(e.data); postMessage(res);}`;
+      const blob = new Blob([code], {type:'application/javascript'});
+      const url = URL.createObjectURL(blob); worker = new Worker(url);
+      worker.onmessage = (m)=>{ $('#fib-result').textContent = 'Result: ' + m.data; $('#status').textContent='Worker finished'; }
+    }
+
+    // --- export html (pack current files into downloadable HTML)
+    function exportHTML(){
+      const payload = {files: state.files};
+      const doc = `<!-- Exported snapshot -->\n<!doctype html>\n<html><head><meta charset=\"utf-8\"></head><body><pre id=\"snap\"></pre><script>const snap = ${JSON.stringify(payload)}; document.getElementById('snap').textContent = JSON.stringify(snap,null,2)</script></body></html>`;
+      const blob = new Blob([doc],{type:'text/html'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'snapshot.html'; a.click();
+    }
+
+    // --- persistence
+    function saveState(){ localStorage.setItem('cb_state', JSON.stringify(state)); $('#status').textContent='Saved to localStorage' }
+    function loadState(){ const s = localStorage.getItem('cb_state'); if(s){ try{ const p = JSON.parse(s); state.files = p.files || state.files; state.activities = p.activities || state.activities; $('#last-saved').textContent = new Date().toLocaleString(); }catch(e){} } }
+
+    // --- init
+    (function init(){
+      loadState(); renderFiles(); loadFile(0); drawChart(); renderTable(); updatePreview(); startWorker();
+
+      // events
+      $('#q').addEventListener('input', ()=>renderTable());
+      $('#new-file').addEventListener('click', newFile);
+      $('#save-file').addEventListener('click', saveActive);
+      $('#save-state').addEventListener('click', saveState);
+      $('#theme-toggle').addEventListener('click', ()=> alert('Theme toggle (demo)'));
+      $('#export-html').addEventListener('click', exportHTML);
+
+      // code preview live
+      let t;
+      $('#code').addEventListener('input', ()=>{ clearTimeout(t); t = setTimeout(()=>{ updatePreview(); },250) });
+
+      // mini table sort handlers
+      document.addEventListener('click', (e)=>{ if(e.target.matches('.nav-item')){ $$('.nav-item').forEach(n=>n.classList.remove('active')); e.target.classList.add('active'); const s = e.target.dataset.section; showSection(s); } });
+
+      // run-fib button uses worker
+      $('#fib-go').addEventListener('click', ()=>{ const n = parseInt($('#fib-n').value)||40; $('#fib-result').textContent='Computing...'; worker.postMessage(n); $('#status').textContent='Worker computing...' });
+      $('#run-fib').addEventListener('click', ()=>{ $('#fib-n').value=36; $('#fib-go').click(); });
+
+      // double-click file to load already handled
+
+      // keyboard shortcuts
+      window.addEventListener('keydown', (e)=>{
+        if((e.ctrlKey||e.metaKey) && e.key==='s'){ e.preventDefault(); saveActive(); }
+        if((e.ctrlKey||e.metaKey) && e.key==='b'){ e.preventDefault(); drawChart(); }
+      })
+
+      // allow dropping text into editor
+      const codeEl = $('#code');
+      codeEl.addEventListener('dragover', e=>e.preventDefault());
+      codeEl.addEventListener('drop', e=>{
+        e.preventDefault(); const t = e.dataTransfer.getData('text/plain'); if(t){ codeEl.textContent += '\n' + t; updatePreview(); }
+      })
+
+      // init accessibility focus
+      $('#code').setAttribute('tabindex',0);
+    })();
+
+    // small polish: expose for debugging
+    window.appState = state;
+  </script>
+</body>
+</html>
